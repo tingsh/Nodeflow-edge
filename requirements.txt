@@ -1,0 +1,55 @@
+# Nodeflow Edge — Python Dependencies
+
+# Core
+sdnotify>=0.3.2
+PyYAML
+simplejson
+orjson
+pybase64
+jsonpath-rw
+regex
+packaging==23.1
+cachetools
+python-dateutil
+psutil
+cryptography
+PySocks
+
+# MQTT Publisher (Nodeflow Cloud)
+paho-mqtt>=1.6.0
+
+# Modbus (TCP + RTU)
+pymodbus>=3.8.0
+pyserial
+pyserial-asyncio
+
+# OPC-UA
+asyncua==1.1.5
+
+# BACnet
+bacpypes3
+
+# BLE
+bleak
+
+# CAN bus
+python-can
+
+# KNX
+xknx
+
+# SNMP
+puresnmp>=2.0.0
+
+# OCPP (EV Charging)
+ocpp
+
+# REST / Request
+requests>=2.32.3
+aiohttp
+
+# XMPP
+slixmpp
+
+# ODBC
+# pyodbc  # Uncomment if using ODBC connector (requires system-level ODBC driver)

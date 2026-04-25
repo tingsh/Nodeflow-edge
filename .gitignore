@@ -1,0 +1,22 @@
+# Nodeflow Edge Git Ignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.DS_Store
+.env
+venv/
+.idea/
+.vscode/
+.eggs/
+*.egg-info/
+node_modules/
+.mypy_cache/
+pytest_cache/
+# Local clones / vendors
+thingsboard-gateway/
+# Build artifacts
+dist/
+build/
+*.egg

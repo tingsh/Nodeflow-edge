@@ -1,0 +1,103 @@
+{
+  "gateway": {
+    "serial_number": "NF-EDGE-001"
+  },
+  "mqtt": {
+    "host": "YOUR_CLOUD_IP",
+    "port": 8883,
+    "topic": "v1/gateway/telemetry",
+    "username": "NF-EDGE-001",
+    "password": "REPLACE_WITH_PROVISIONED_PASSWORD",
+    "qos": 1,
+    "client_id": "nodeflow-edge-001",
+    "max_queue_size": 10000,
+    "reconnect_delay_min": 1,
+    "reconnect_delay_max": 60,
+    "tls": {
+      "mode": "one-way",
+      "ca_certs": "/opt/nodeflow-edge/certs/ca.crt",
+      "certfile": "/opt/nodeflow-edge/certs/client.crt",
+      "keyfile": "/opt/nodeflow-edge/certs/client.key"
+    }
+  },
+  "logging": {
+    "file": "/opt/nodeflow-edge/logs/nodeflow-edge.log",
+    "max_bytes": 5242880,
+    "backup_count": 5
+  },
+  "features": {
+    "remote_logging": {
+      "enabled": true,
+      "min_level": "INFO",
+      "batch_size": 20,
+      "flush_interval_seconds": 5,
+      "max_buffer_size": 500
+    },
+    "attribute_sync": {
+      "enabled": true,
+      "heartbeat_interval_seconds": 60
+    },
+    "remote_config": {
+      "enabled": true,
+      "backup_dir": "config_backups"
+    },
+    "rpc": {
+      "enabled": true
+    }
+  },
+  "connectors": [
+    {
+      "type": "modbus",
+      "name": "Modbus TCP Connector",
+      "config": {
+        "master": {
+          "slaves": [
+            {
+              "host": "192.168.1.100",
+              "port": 502,
+              "type": "tcp",
+              "method": "socket",
+              "timeout": 35,
+              "byteOrder": "BIG",
+              "wordOrder": "BIG",
+              "retries": true,
+              "retryOnEmpty": true,
+              "retryOnInvalid": true,
+              "pollPeriod": 5000,
+              "unitId": 1,
+              "deviceName": "Power Meter 1",
+              "sendDataOnlyOnChange": false,
+              "connectAttemptTimeMs": 5000,
+              "connectAttemptCount": 5,
+              "waitAfterFailedAttemptsMs": 300000,
+              "timeseries": [
+                {
+                  "tag": "active_power",
+                  "type": "32float",
+                  "functionCode": 3,
+                  "objectsCount": 2,
+                  "address": 3060
+                },
+                {
+                  "tag": "voltage",
+                  "type": "32float",
+                  "functionCode": 3,
+                  "objectsCount": 2,
+                  "address": 3028
+                },
+                {
+                  "tag": "current",
+                  "type": "32float",
+                  "functionCode": 3,
+                  "objectsCount": 2,
+                  "address": 3000
+                }
+              ],
+              "attributes": []
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

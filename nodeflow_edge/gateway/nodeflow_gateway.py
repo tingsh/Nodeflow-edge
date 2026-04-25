@@ -1,0 +1,358 @@
+"""
+Nodeflow Edge Gateway — Core Orchestrator
+
+Replaces TBGatewayService. Loads config, starts connectors, receives
+ConvertedData from them, formats payloads, and publishes via MQTT to
+the Nodeflow Cloud platform.
+"""
+
+import json
+import logging
+import os
+import signal
+import sys
+from queue import SimpleQueue
+from threading import Event, Thread
+from time import monotonic, sleep
+
+import sdnotify
+
+from nodeflow_edge.gateway.attribute_sync_handler import AttributeSyncHandler
+from nodeflow_edge.gateway.constants import DEFAULT_CONNECTORS
+from nodeflow_edge.gateway.discovery_service import DiscoveryService
+from nodeflow_edge.gateway.entities.converted_data import ConvertedData
+from nodeflow_edge.gateway.nodeflow_mqtt_publisher import NodeflowMqttPublisher
+from nodeflow_edge.gateway.payload_formatter import PayloadFormatter
+from nodeflow_edge.gateway.remote_config_handler import RemoteConfigHandler
+from nodeflow_edge.gateway.remote_log_handler import RemoteLogHandler
+from nodeflow_edge.gateway.rpc_handler import RpcHandler
+from nodeflow_edge.tb_utility.tb_loader import TBModuleLoader
+
+log = logging.getLogger("nodeflow_edge.gateway")
+
+
+class NodeflowGateway:
+    """
+    Core gateway process. Implements the interface expected by TB-style connectors
+    so they can be used without modification.
+    """
+
+    def __init__(self, config_path: str):
+        self._config_path = config_path
+        self._config = self._load_config(config_path)
+
+        # Gateway identity
+        self._serial_number = self._config["gateway"]["serial_number"]
+
+        # Internal state
+        self._devices = {}          # device_name -> device_info
+        self._connectors = []       # list of running connector instances
+        self._stopped = False
+        self.stop_event = Event()
+
+        # MQTT publisher
+        self._mqtt_publisher = NodeflowMqttPublisher(self._config["mqtt"], serial_number=self._serial_number, config_path=config_path)
+
+        # Payload formatter
+        self._formatter = PayloadFormatter(self._serial_number)
+
+        # Data queue — connectors put ConvertedData here via send_to_storage
+        self._data_queue = SimpleQueue()
+
+        # Report strategy service placeholder (some connectors check for it)
+        self._report_strategy_service = None
+
+        # ─── Cloud feature handlers ───────────────────────────────────
+        feature_cfg = self._config.get("features", {})
+
+        # Remote logging handler
+        self._remote_log_handler = RemoteLogHandler(
+            publisher=self._mqtt_publisher,
+            serial_number=self._serial_number,
+            config=feature_cfg.get("remote_logging", {}),
+        )
+
+        # Attribute sync handler
+        self._attribute_sync = AttributeSyncHandler(
+            gateway=self,
+            publisher=self._mqtt_publisher,
+            serial_number=self._serial_number,
+            config=feature_cfg.get("attribute_sync", {}),
+        )
+
+        # Remote config handler
+        self._remote_config = RemoteConfigHandler(
+            gateway=self,
+            publisher=self._mqtt_publisher,
+            serial_number=self._serial_number,
+            config_path=config_path,
+            config=feature_cfg.get("remote_config", {}),
+        )
+
+        # RPC handler
+        self._rpc_handler = RpcHandler(
+            gateway=self,
+            publisher=self._mqtt_publisher,
+            serial_number=self._serial_number,
+            config_path=config_path,
+            config=feature_cfg.get("rpc", {}),
+        )
+
+        # Discovery service
+        self._discovery_service = DiscoveryService(
+            gateway=self,
+            publisher=self._mqtt_publisher,
+            serial_number=self._serial_number,
+            config=feature_cfg.get("discovery", {}),
+        )
+
+        log.info("Nodeflow Edge Gateway initialized — serial_number=%s", self._serial_number)
+
+    # ─── Configuration ────────────────────────────────────────────────
+
+    @staticmethod
+    def _load_config(config_path: str) -> dict:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        log.info("Configuration loaded from %s", config_path)
+        NodeflowGateway._validate_config(config, config_path)
+        return config
+
+    @staticmethod
+    def _validate_config(config: dict, config_path: str):
+        """Validate required config keys on startup. Exits with a clear message on failure."""
+        errors = []
+
+        # Required top-level keys
+        if "gateway" not in config or "serial_number" not in config.get("gateway", {}):
+            errors.append("gateway.serial_number")
+        if "mqtt" not in config:
+            errors.append("mqtt (entire section)")
+        else:
+            mqtt_cfg = config["mqtt"]
+            if "host" not in mqtt_cfg:
+                errors.append("mqtt.host")
+            if "port" not in mqtt_cfg:
+                errors.append("mqtt.port")
+        if "connectors" not in config or not isinstance(config.get("connectors"), list):
+            errors.append("connectors (must be a list)")
+
+        # TLS cross-validation
+        tls_cfg = config.get("mqtt", {}).get("tls")
+        if tls_cfg:
+            mode = tls_cfg.get("mode", "one-way")
+            ca_certs = tls_cfg.get("ca_certs")
+            if not ca_certs:
+                errors.append("mqtt.tls.ca_certs (required when tls is enabled)")
+            elif not os.path.isfile(ca_certs):
+                errors.append(f"mqtt.tls.ca_certs — file not found: {ca_certs}")
+            if mode == "mutual":
+                for key in ("certfile", "keyfile"):
+                    val = tls_cfg.get(key)
+                    if not val:
+                        errors.append(f"mqtt.tls.{key} (required for mutual TLS mode)")
+                    elif not os.path.isfile(val):
+                        errors.append(f"mqtt.tls.{key} — file not found: {val}")
+
+        if errors:
+            print("\n" + "=" * 60)
+            print("  CONFIG ERROR — Nodeflow Edge cannot start")
+            print("=" * 60)
+            for err in errors:
+                print(f"  ✗ Missing or invalid: {err}")
+            print(f"\n  Edit {config_path} to fix these issues.\n")
+            sys.exit(1)
+
+    def get_config_path(self) -> str:
+        return os.path.dirname(self._config_path)
+
+    # ─── Device registry (called by connectors) ──────────────────────
+
+    def get_devices(self) -> dict:
+        return self._devices
+
+    def add_device(self, device_name, content, device_type='default'):
+        self._devices[device_name] = {
+            "device_type": device_type,
+            "connector": content.get("connector"),
+        }
+        log.info("Device registered: %s (type=%s)", device_name, device_type)
+        return True
+
+    def del_device(self, device_name):
+        if device_name in self._devices:
+            del self._devices[device_name]
+            log.info("Device unregistered: %s", device_name)
+
+    # ─── Data pathway (called by connectors) ─────────────────────────
+
+    def send_to_storage(self, connector_name, connector_id, converted_data: ConvertedData):
+        """Main data ingress point. Connectors call this to submit polled data."""
+        self._data_queue.put((connector_name, converted_data))
+
+    def send_rpc_reply(self, device=None, req_id=None, content=None, **kwargs):
+        """RPC replies — logged locally since we have no TB server to send to."""
+        log.debug("RPC reply for device=%s req_id=%s: %s", device, req_id, content)
+
+    def send_attributes(self, device_name, attributes):
+        """Attribute updates — format and publish."""
+        log.debug("Attribute update for device=%s: %s", device_name, attributes)
+
+    def is_rpc_in_progress(self, rpc_id):
+        return False
+
+    def register_rpc_request_timeout(self, *args, **kwargs):
+        pass
+
+    def rpc_with_reply_processing(self, *args, **kwargs):
+        pass
+
+    def get_report_strategy_service(self):
+        return self._report_strategy_service
+
+    # ─── Connector lifecycle ──────────────────────────────────────────
+
+    def _start_connectors(self):
+        """Instantiate and start all connectors defined in config."""
+        connectors_config = self._config.get("connectors", [])
+
+        for connector_cfg in connectors_config:
+            connector_type = connector_cfg["type"]
+            connector_name = connector_cfg.get("name", connector_type)
+            connector_config = connector_cfg.get("config", {})
+            connector_config["name"] = connector_name
+
+            class_name = DEFAULT_CONNECTORS.get(connector_type)
+            if not class_name:
+                log.error("Unknown connector type: %s. Skipping.", connector_type)
+                continue
+
+            try:
+                connector_class = TBModuleLoader.import_module(connector_type, class_name)
+                if isinstance(connector_class, list):
+                    log.error("Failed to load connector %s: %s", connector_type, connector_class)
+                    continue
+
+                connector = connector_class(self, connector_config, connector_type)
+                connector.open()
+                self._connectors.append(connector)
+                log.info("Started connector: %s (%s)", connector_name, connector_type)
+            except Exception as e:
+                log.exception("Failed to start connector %s: %s", connector_name, e)
+
+    def _stop_connectors(self):
+        """Stop all running connectors."""
+        for connector in self._connectors:
+            try:
+                connector.close()
+                log.info("Stopped connector: %s", connector.get_name())
+            except Exception as e:
+                log.error("Error stopping connector %s: %s", connector.get_name(), e)
+        self._connectors.clear()
+
+    # ─── Data processing loop ─────────────────────────────────────────
+
+    def _data_processing_loop(self):
+        """
+        Background thread that reads ConvertedData from the queue,
+        formats it into Nodeflow Cloud payloads, and publishes via MQTT.
+        """
+        while not self._stopped:
+            try:
+                connector_name, converted_data = self._data_queue.get(timeout=0.5)
+            except Exception:
+                continue
+
+            try:
+                payloads = self._formatter.format(converted_data)
+                for payload in payloads:
+                    self._mqtt_publisher.publish(payload)
+                    log.debug("Published payload from %s: device=%s",
+                              connector_name, converted_data.device_name)
+            except Exception as e:
+                log.exception("Error processing data from %s: %s", connector_name, e)
+
+    # ─── Main run / shutdown ──────────────────────────────────────────
+
+    def run(self):
+        """Start the gateway: connect MQTT, start connectors, process data."""
+        log.info("=" * 60)
+        log.info("  Nodeflow Edge Gateway starting...")
+        log.info("  Serial Number: %s", self._serial_number)
+        log.info("  MQTT Broker:   %s:%d",
+                 self._config["mqtt"]["host"], self._config["mqtt"]["port"])
+        log.info("=" * 60)
+
+        # Register signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+        # Connect to MQTT broker
+        self._mqtt_publisher.connect()
+
+        # Start cloud feature handlers (after MQTT is connected)
+        self._remote_log_handler.start()
+        self._remote_log_handler.install()  # Install on root logger
+        self._attribute_sync.start()
+        self._remote_config.start()
+        self._rpc_handler.start()
+
+        # Start discovery service
+        self._discovery_service.start()
+
+        # Start connectors
+        self._start_connectors()
+
+        # Start data processing thread
+        data_thread = Thread(target=self._data_processing_loop,
+                             name="DataProcessor", daemon=True)
+        data_thread.start()
+
+        log.info("Gateway is running. Press Ctrl+C to stop.")
+
+        # Notify systemd that startup is complete
+        self._sd_notifier = sdnotify.SystemdNotifier()
+        self._sd_notifier.notify("READY=1")
+        log.info("Notified systemd: READY=1")
+
+        # Main thread waits for stop signal, pinging watchdog every 60s
+        last_watchdog = monotonic()
+        try:
+            while not self._stopped:
+                self.stop_event.wait(timeout=1.0)
+                if monotonic() - last_watchdog >= 60:
+                    self._sd_notifier.notify("WATCHDOG=1")
+                    last_watchdog = monotonic()
+        except KeyboardInterrupt:
+            pass
+
+        self.stop()
+
+    def stop(self):
+        """Gracefully shut down the gateway."""
+        if self._stopped:
+            return
+        self._stopped = True
+        self.stop_event.set()
+
+        log.info("Shutting down Nodeflow Edge Gateway...")
+
+        # Stop cloud feature handlers first
+        self._discovery_service.stop()
+        self._rpc_handler.stop()
+        self._remote_config.stop()
+        self._attribute_sync.stop()
+        self._remote_log_handler.uninstall()
+        self._remote_log_handler.stop()
+
+        self._stop_connectors()
+        self._mqtt_publisher.disconnect()
+        log.info("Nodeflow Edge Gateway stopped.")
+
+    def _signal_handler(self, signum, frame):
+        log.info("Received signal %d, shutting down...", signum)
+        self.stop()
+
+    @property
+    def stopped(self):
+        return self._stopped

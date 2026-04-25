@@ -1,0 +1,443 @@
+"""
+Nodeflow Edge RPC Handler
+
+Subscribes to `v1/gateway/{serial_number}/rpc/request` for inbound RPC
+commands from Nodeflow Cloud. Dispatches commands and publishes results
+to `v1/gateway/rpc/response`.
+
+Supported Commands:
+- ping                  → respond with pong + timestamp
+- get_config            → return current config.json content
+- set_log_level         → change log level at runtime
+- restart_connector     → restart a specific connector by name
+- restart_all           → restart all connectors
+- reboot                → reboot the host system
+- get_status            → return gateway status summary
+- get_devices           → return list of connected devices
+- write_device          → write to a physical device (e.g. Modbus register write)
+- read_device           → on-demand read from a physical device
+- scan_devices          → trigger device discovery scan
+
+Inbound RPC Request (cloud → edge):
+{
+    "request_id": "uuid-string",
+    "method": "ping" | "get_config" | "set_log_level" | ...,
+    "params": { ... }
+}
+
+Outbound RPC Response (edge → cloud):
+{
+    "serial_number": "NF-EDGE-001",
+    "request_id": "uuid-string",
+    "method": "ping",
+    "ts": 1714000000000,
+    "status": "success" | "error",
+    "result": { ... } | null,
+    "error": "..." | null
+}
+"""
+
+import json
+import logging
+import os
+import subprocess
+from time import time, monotonic
+from typing import Optional
+
+log = logging.getLogger("nodeflow_edge.rpc_handler")
+
+
+class RpcHandler:
+    """Handles inbound RPC commands from Nodeflow Cloud."""
+
+    def __init__(self, gateway, publisher, serial_number: str,
+                 config_path: str, config: Optional[dict] = None):
+        self._gateway = gateway
+        self._publisher = publisher
+        self._serial_number = serial_number
+        self._config_path = config_path
+        self._handler_config = config or {}
+
+        self._enabled = self._handler_config.get("enabled", True)
+        self._inbound_topic = f"v1/gateway/{self._serial_number}/rpc/request"
+        self._start_time = monotonic()
+
+        # Command dispatch table
+        self._commands = {
+            "ping": self._cmd_ping,
+            "get_config": self._cmd_get_config,
+            "set_log_level": self._cmd_set_log_level,
+            "restart_connector": self._cmd_restart_connector,
+            "restart_all": self._cmd_restart_all,
+            "reboot": self._cmd_reboot,
+            "get_status": self._cmd_get_status,
+            "get_devices": self._cmd_get_devices,
+            "write_device": self._cmd_write_device,
+            "read_device": self._cmd_read_device,
+            "scan_devices": self._cmd_scan_devices,
+        }
+
+    def start(self):
+        """Subscribe to the RPC request topic."""
+        if not self._enabled:
+            log.info("RPC handler is disabled.")
+            return
+
+        self._publisher.subscribe(self._inbound_topic, self._on_rpc_request)
+        log.info("RPC handler started, listening on: %s", self._inbound_topic)
+
+    def stop(self):
+        """No persistent resources to clean up."""
+        pass
+
+    def _on_rpc_request(self, topic: str, payload: dict):
+        """Handle an inbound RPC request."""
+        request_id = payload.get("request_id", "unknown")
+        method = payload.get("method", "")
+        params = payload.get("params", {})
+
+        log.info("RPC request received: method=%s, request_id=%s", method, request_id)
+
+        handler = self._commands.get(method)
+        if not handler:
+            self._send_response(request_id, method, status="error",
+                                error=f"Unknown RPC method: {method}")
+            return
+
+        try:
+            result = handler(params)
+            self._send_response(request_id, method, status="success", result=result)
+        except Exception as e:
+            log.exception("RPC command '%s' failed: %s", method, e)
+            self._send_response(request_id, method, status="error", error=str(e))
+
+    def _send_response(self, request_id: str, method: str, status: str,
+                       result=None, error=None):
+        """Publish an RPC response to the cloud."""
+        payload = {
+            "serial_number": self._serial_number,
+            "request_id": request_id,
+            "method": method,
+            "ts": int(time() * 1000),
+            "status": status,
+            "result": result,
+            "error": error,
+        }
+        self._publisher.publish_rpc_response(payload)
+        log.debug("RPC response sent: method=%s, status=%s", method, status)
+
+    # ─── Command implementations ──────────────────────────────────────
+
+    def _cmd_ping(self, params: dict) -> dict:
+        """Simple connectivity check."""
+        return {
+            "pong": True,
+            "ts": int(time() * 1000),
+            "uptime_seconds": int(monotonic() - self._start_time),
+        }
+
+    def _cmd_get_config(self, params: dict) -> dict:
+        """Return the current config.json content."""
+        with open(self._config_path, 'r') as f:
+            config = json.load(f)
+        return {"config": config}
+
+    def _cmd_set_log_level(self, params: dict) -> dict:
+        """
+        Change log level at runtime.
+        params: {"logger": "nodeflow_edge.gateway" (optional), "level": "DEBUG"}
+        """
+        level_name = params.get("level", "INFO").upper()
+        logger_name = params.get("logger")
+
+        level = logging.getLevelName(level_name)
+        if isinstance(level, str):
+            raise ValueError(f"Invalid log level: {level_name}")
+
+        if logger_name:
+            target_logger = logging.getLogger(logger_name)
+            target_logger.setLevel(level)
+            log.info("Set log level for '%s' to %s", logger_name, level_name)
+        else:
+            # Set root logger level
+            logging.getLogger().setLevel(level)
+            log.info("Set root log level to %s", level_name)
+
+        return {"logger": logger_name or "root", "level": level_name}
+
+    def _cmd_restart_connector(self, params: dict) -> dict:
+        """
+        Restart a specific connector by name.
+        params: {"name": "Modbus TCP Connector"}
+        """
+        name = params.get("name")
+        if not name:
+            raise ValueError("Missing 'name' parameter")
+
+        # Find the connector
+        target = None
+        for conn in self._gateway._connectors:
+            try:
+                if conn.get_name() == name:
+                    target = conn
+                    break
+            except Exception:
+                pass
+
+        if not target:
+            raise ValueError(f"Connector '{name}' not found")
+
+        # Stop it
+        try:
+            target.close()
+            log.info("Stopped connector: %s", name)
+        except Exception as e:
+            log.warning("Error stopping connector %s: %s", name, e)
+
+        # Remove from list
+        self._gateway._connectors.remove(target)
+
+        # Find its config and restart
+        connector_config = None
+        for conn_cfg in self._gateway._config.get("connectors", []):
+            if conn_cfg.get("name") == name:
+                connector_config = conn_cfg
+                break
+
+        if connector_config:
+            from nodeflow_edge.gateway.constants import DEFAULT_CONNECTORS
+            from nodeflow_edge.tb_utility.tb_loader import TBModuleLoader
+
+            ctype = connector_config["type"]
+            cname = connector_config.get("name", ctype)
+            ccfg = connector_config.get("config", {})
+            ccfg["name"] = cname
+
+            class_name = DEFAULT_CONNECTORS.get(ctype)
+            if class_name:
+                connector_class = TBModuleLoader.import_module(ctype, class_name)
+                if not isinstance(connector_class, list):
+                    new_conn = connector_class(self._gateway, ccfg, ctype)
+                    new_conn.open()
+                    self._gateway._connectors.append(new_conn)
+                    log.info("Restarted connector: %s", cname)
+
+        return {"connector": name, "restarted": True}
+
+    def _cmd_restart_all(self, params: dict) -> dict:
+        """Restart all connectors."""
+        self._gateway._stop_connectors()
+        self._gateway._start_connectors()
+        count = len(self._gateway._connectors)
+        return {"connectors_restarted": count}
+
+    def _cmd_reboot(self, params: dict) -> dict:
+        """
+        Reboot the host system.
+        This is a privileged operation — only works if running as root/systemd.
+        """
+        delay = params.get("delay_seconds", 5)
+        log.warning("REBOOT requested! Rebooting in %d seconds...", delay)
+
+        # Schedule reboot in background so we can still send the response
+        subprocess.Popen(
+            ["sh", "-c", f"sleep {delay} && sudo reboot"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        return {"reboot_scheduled": True, "delay_seconds": delay}
+
+    def _cmd_get_status(self, params: dict) -> dict:
+        """Return a summary of the gateway's current status."""
+        uptime = int(monotonic() - self._start_time)
+        devices = self._gateway.get_devices()
+        connectors = []
+        for conn in self._gateway._connectors:
+            try:
+                connectors.append({
+                    "name": conn.get_name(),
+                    "type": conn.get_type(),
+                    "connected": conn.is_connected() if hasattr(conn, 'is_connected') else None,
+                })
+            except Exception:
+                pass
+
+        return {
+            "serial_number": self._serial_number,
+            "uptime_seconds": uptime,
+            "mqtt_connected": self._publisher.is_connected(),
+            "device_count": len(devices),
+            "devices": list(devices.keys()),
+            "connectors": connectors,
+        }
+
+    def _cmd_get_devices(self, params: dict) -> dict:
+        """Return detailed device information."""
+        return {"devices": self._gateway.get_devices()}
+
+    # ─── Device control commands ──────────────────────────────────────
+
+    def _find_connector_for_device(self, device_name: str):
+        """
+        Find the connector instance that owns the given device.
+        Returns (connector, device_info) or raises ValueError.
+        """
+        devices = self._gateway.get_devices()
+        device_info = devices.get(device_name)
+        if not device_info:
+            raise ValueError(f"Device '{device_name}' not found in gateway registry")
+
+        connector = device_info.get("connector")
+        if not connector:
+            raise ValueError(f"Device '{device_name}' has no connector reference")
+
+        return connector, device_info
+
+    def _build_connector_rpc_content(self, device_name: str, method: str, params: dict) -> dict:
+        """
+        Build the content dict expected by connector.server_side_rpc_handler().
+        The format matches what RPCRequest (Modbus) / OpcUaRpcRequest (OPC-UA) parsers expect.
+        """
+        return {
+            "device": device_name,
+            "data": {
+                "id": params.get("rpc_id", 1),
+                "method": method,
+                "params": params,
+            },
+            "timeout": params.get("timeout", 5.0),
+        }
+
+    def _cmd_write_device(self, params: dict) -> dict:
+        """
+        Write to a physical device via its connector.
+
+        params: {
+            "device_name": "VFD Motor 1",
+            "functionCode": 6,       // Modbus: 5=coil, 6=register, 15=multi-coil, 16=multi-register
+            "address": 2,
+            "value": 1500,
+            "type": "16uint",         // optional: data type for encoding
+            "objectsCount": 1,       // optional: number of registers
+            "timeout": 5.0           // optional: seconds
+        }
+        """
+        device_name = params.get("device_name")
+        if not device_name:
+            raise ValueError("Missing 'device_name' parameter")
+
+        function_code = params.get("functionCode")
+        if function_code is None:
+            raise ValueError("Missing 'functionCode' parameter")
+        if function_code not in (5, 6, 15, 16):
+            raise ValueError(f"Invalid write functionCode: {function_code}. Must be 5, 6, 15, or 16")
+
+        if "address" not in params:
+            raise ValueError("Missing 'address' parameter")
+        if "value" not in params:
+            raise ValueError("Missing 'value' parameter")
+
+        connector, _ = self._find_connector_for_device(device_name)
+
+        # Build the RPC content in the format the connector expects
+        rpc_params = {
+            "functionCode": function_code,
+            "address": params["address"],
+            "value": params["value"],
+        }
+        if "type" in params:
+            rpc_params["type"] = params["type"]
+        if "objectsCount" in params:
+            rpc_params["objectsCount"] = params["objectsCount"]
+
+        content = self._build_connector_rpc_content(device_name, "set", rpc_params)
+
+        log.info("Writing to device '%s': FC=%d, addr=%d, value=%s",
+                 device_name, function_code, params["address"], params["value"])
+
+        response = connector.server_side_rpc_handler(content)
+
+        return {
+            "device_name": device_name,
+            "operation": "write",
+            "functionCode": function_code,
+            "address": params["address"],
+            "value": params["value"],
+            "response": response,
+        }
+
+    def _cmd_scan_devices(self, params: dict) -> dict:
+        """
+        Trigger a device discovery scan.
+
+        params: {
+            "scan_type": "manual",     // optional: "manual" or "boot"
+            "slave_range": [1, 32]     // optional: override default slave range
+        }
+        """
+        discovery = getattr(self._gateway, "_discovery_service", None)
+        if not discovery:
+            raise ValueError("Discovery service is not available on this gateway")
+
+        scan_type = params.get("scan_type", "manual")
+        report = discovery.scan(scan_type=scan_type)
+
+        return {
+            "devices_found": len(report.get("discovered_devices", [])),
+            "interfaces_scanned": len(report.get("interfaces", [])),
+            "scan_ts": report.get("scan_ts"),
+        }
+
+    def _cmd_read_device(self, params: dict) -> dict:
+        """
+        On-demand read from a physical device via its connector.
+
+        params: {
+            "device_name": "Power Meter 1",
+            "functionCode": 3,       // Modbus: 1=coils, 2=discrete, 3=holding, 4=input
+            "address": 3060,
+            "objectsCount": 2,       // number of registers to read
+            "type": "32float",       // optional: data type for decoding
+            "timeout": 5.0           // optional: seconds
+        }
+        """
+        device_name = params.get("device_name")
+        if not device_name:
+            raise ValueError("Missing 'device_name' parameter")
+
+        function_code = params.get("functionCode")
+        if function_code is None:
+            raise ValueError("Missing 'functionCode' parameter")
+        if function_code not in (1, 2, 3, 4):
+            raise ValueError(f"Invalid read functionCode: {function_code}. Must be 1, 2, 3, or 4")
+
+        if "address" not in params:
+            raise ValueError("Missing 'address' parameter")
+
+        connector, _ = self._find_connector_for_device(device_name)
+
+        # Build the RPC content in the format the connector expects
+        rpc_params = {
+            "functionCode": function_code,
+            "address": params["address"],
+            "objectsCount": params.get("objectsCount", 1),
+        }
+        if "type" in params:
+            rpc_params["type"] = params["type"]
+
+        content = self._build_connector_rpc_content(device_name, "get", rpc_params)
+
+        log.info("Reading from device '%s': FC=%d, addr=%d, count=%d",
+                 device_name, function_code, params["address"], rpc_params["objectsCount"])
+
+        response = connector.server_side_rpc_handler(content)
+
+        return {
+            "device_name": device_name,
+            "operation": "read",
+            "functionCode": function_code,
+            "address": params["address"],
+            "objectsCount": rpc_params["objectsCount"],
+            "response": response,
+        }
