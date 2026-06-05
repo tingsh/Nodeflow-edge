@@ -22,6 +22,7 @@ from time import sleep, time
 from typing import Callable, Dict, List, Optional
 
 import paho.mqtt.client as mqtt
+from nodeflow_edge.storage.sqlite.sqlite_event_storage import SQLiteEventStorage
 
 log = logging.getLogger("nodeflow_edge.mqtt_publisher")
 
@@ -57,6 +58,17 @@ class NodeflowMqttPublisher:
         # Inbound message routing: topic -> list of callbacks
         self._subscriptions: Dict[str, List[Callable]] = {}
         self._subscription_lock = threading.Lock()
+
+        # Instantiate SQLiteEventStorage as local database buffer
+        storage_config = {
+            "data_file_path": "storage/sqlite/",
+            "max_read_records_count": 50,
+            "writing_batch_size": 50,
+        }
+        self._storage_stop_event = threading.Event()
+        self._storage = SQLiteEventStorage(storage_config, log, self._storage_stop_event)
+        self._replay_thread = None
+        self._replay_lock = threading.Lock()
 
         # Create MQTT client (paho-mqtt v2.x API)
         self._client = mqtt.Client(
@@ -184,6 +196,8 @@ class NodeflowMqttPublisher:
         """Gracefully disconnect from the broker."""
         log.info("Disconnecting from MQTT broker...")
         self._stopped = True
+        self._storage_stop_event.set()
+        self._storage.stop()
         # Flush remaining messages
         self._flush_queue()
         self._client.loop_stop()
@@ -222,17 +236,24 @@ class NodeflowMqttPublisher:
         Queue a payload dict for publishing.
         If topic is None, publishes to the default telemetry topic.
         """
-        item = (topic or self._telemetry_topic, payload)
-        try:
-            self._queue.put_nowait(item)
-        except Full:
-            log.warning("MQTT publish queue is full (%d messages). Dropping oldest message.",
-                        self._max_queue_size)
+        topic = topic or self._telemetry_topic
+        item = (topic, payload)
+        
+        if self._connected:
             try:
-                self._queue.get_nowait()  # Drop oldest
-            except Empty:
-                pass
-            self._queue.put_nowait(item)
+                self._queue.put_nowait(item)
+            except Full:
+                log.warning("MQTT publish queue is full (%d messages). Dropping oldest message.",
+                            self._max_queue_size)
+                try:
+                    self._queue.get_nowait()  # Drop oldest
+                except Empty:
+                    pass
+                self._queue.put_nowait(item)
+        else:
+            log.debug("Edge Gateway is offline. Buffering telemetry payload to SQLite database.")
+            event_str = json.dumps({"topic": topic, "payload": payload})
+            self._storage.put(event_str)
 
     def publish_telemetry(self, payload: dict):
         """Publish to the telemetry topic."""
@@ -261,6 +282,8 @@ class NodeflowMqttPublisher:
             self._activation_message_shown = False
             # Re-subscribe to all registered topics on (re)connect
             self._resubscribe_all()
+            # Trigger throttled replay of offline buffer
+            self._trigger_replay()
         else:
             log.error("MQTT connection failed with code %s", rc)
             self._connected = False
@@ -348,19 +371,61 @@ class NodeflowMqttPublisher:
                     topic, json_payload, qos=self._qos
                 )
                 if result.rc != mqtt.MQTT_ERR_SUCCESS:
-                    log.warning("Publish failed (rc=%d) on %s, re-queuing.", result.rc, topic)
-                    self._requeue((topic, payload))
+                    log.warning("Publish failed (rc=%d) on %s, buffering to SQLite.", result.rc, topic)
+                    event_str = json.dumps({"topic": topic, "payload": payload})
+                    self._storage.put(event_str)
             else:
-                log.debug("Not connected — buffering message locally.")
-                self._requeue((topic, payload))
-                sleep(1)  # Wait before retrying
+                log.debug("Not connected in publish loop — buffering message to SQLite.")
+                event_str = json.dumps({"topic": topic, "payload": payload})
+                self._storage.put(event_str)
+                sleep(1)
 
-    def _requeue(self, item):
-        """Put a message back on the queue for retry."""
-        try:
-            self._queue.put_nowait(item)
-        except Full:
-            log.warning("Queue full during requeue. Message dropped.")
+    def _trigger_replay(self):
+        """Spawns the background replay thread if it is not already running."""
+        with self._replay_lock:
+            if self._replay_thread is None or not self._replay_thread.is_alive():
+                self._replay_thread = threading.Thread(
+                    target=self._replay_loop, name="MQTT-Replayer", daemon=True
+                )
+                self._replay_thread.start()
+
+    def _replay_loop(self):
+        """Replay buffered historical messages from SQLite at a throttled pace."""
+        log.info("Replay loop started. Checking SQLite database buffer for offline events...")
+        while not self._stopped and self._connected:
+            storage_len = self._storage.len()
+            if storage_len == 0:
+                log.info("SQLite database buffer is empty. Replay complete.")
+                break
+                
+            pack = self._storage.get_event_pack()
+            if not pack:
+                sleep(0.5)
+                continue
+                
+            log.info("Replaying batch of %d events from SQLite...", len(pack))
+            
+            success_count = 0
+            for event_str in pack:
+                if self._stopped or not self._connected:
+                    break
+                try:
+                    event = json.loads(event_str)
+                    topic = event["topic"]
+                    payload = event["payload"]
+                    
+                    result = self._client.publish(topic, json.dumps(payload), qos=self._qos)
+                    sleep(0.1)  # 100ms throttle between messages
+                    
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        success_count += 1
+                except Exception as e:
+                    log.error("Failed to replay buffered event: %s", e)
+            
+            # Indicate that pack processing is complete
+            self._storage.event_pack_processing_done()
+            log.info("Replayed %d of %d events from batch.", success_count, len(pack))
+            sleep(0.5)
 
     def _flush_queue(self):
         """Attempt to publish remaining messages before shutdown."""

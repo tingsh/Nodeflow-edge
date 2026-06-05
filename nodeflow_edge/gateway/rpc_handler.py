@@ -104,12 +104,19 @@ class RpcHandler:
                                 error=f"Unknown RPC method: {method}")
             return
 
-        try:
-            result = handler(params)
-            self._send_response(request_id, method, status="success", result=result)
-        except Exception as e:
-            log.exception("RPC command '%s' failed: %s", method, e)
-            self._send_response(request_id, method, status="error", error=str(e))
+        import threading
+
+        def execute():
+            try:
+                result = handler(params)
+                self._send_response(request_id, method, status="success", result=result)
+            except Exception as e:
+                log.exception("RPC command '%s' failed: %s", method, e)
+                self._send_response(request_id, method, status="error", error=str(e))
+
+        thread = threading.Thread(target=execute, name=f"RPC-{method}-{request_id[:8]}")
+        thread.daemon = True
+        thread.start()
 
     def _send_response(self, request_id: str, method: str, status: str,
                        result=None, error=None):
