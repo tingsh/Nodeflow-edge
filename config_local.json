@@ -1,0 +1,93 @@
+{
+  "gateway": {
+    "serial_number": "12345678"
+  },
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "topic": "v1/gateway/telemetry",
+    "username": "",
+    "password": "",
+    "qos": 1,
+    "client_id": "nodeflow-edge-12345678",
+    "max_queue_size": 10000,
+    "reconnect_delay_min": 1,
+    "reconnect_delay_max": 60
+  },
+  "logging": {
+    "file": "./nodeflow-edge.log",
+    "max_bytes": 5242880,
+    "backup_count": 5
+  },
+  "features": {
+    "remote_logging": {
+      "enabled": true,
+      "min_level": "INFO",
+      "batch_size": 20,
+      "flush_interval_seconds": 5,
+      "max_buffer_size": 500
+    },
+    "attribute_sync": {
+      "enabled": true,
+      "heartbeat_interval_seconds": 60
+    },
+    "remote_config": {
+      "enabled": true,
+      "backup_dir": "config_backups"
+    },
+    "rpc": {
+      "enabled": true
+    }
+  },
+  "connectors": [
+    {
+      "type": "modbus",
+      "name": "Modbus TCP Connector",
+      "config": {
+        "logLevel": "DEBUG",
+        "master": {
+          "slaves": [
+            {
+              "host": "127.0.0.1",
+              "port": 5020,
+              "type": "tcp",
+              "method": "socket",
+              "timeout": 35,
+              "byteOrder": "BIG",
+              "wordOrder": "BIG",
+              "retries": true,
+              "retryOnEmpty": true,
+              "retryOnInvalid": true,
+              "pollPeriod": 5000,
+              "unitId": 1,
+              "deviceName": "Power meter 1",
+              "sendDataOnlyOnChange": false,
+              "connectAttemptTimeMs": 5000,
+              "connectAttemptCount": 5,
+              "waitAfterFailedAttemptsMs": 300000,
+              "timeseries": [
+                {
+                  "tag": "voltage",
+                  "type": "16int",
+                  "functionCode": 3,
+                  "objectsCount": 1,
+                  "address": 0,
+                  "multiplier": 0.1
+                },
+                {
+                  "tag": "active_power",
+                  "type": "16int",
+                  "functionCode": 3,
+                  "objectsCount": 1,
+                  "address": 1,
+                  "multiplier": 0.1
+                }
+              ],
+              "attributes": []
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

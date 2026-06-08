@@ -267,6 +267,30 @@ class TestRpcHandler(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["result"]["operation"], "read")
 
+    def test_update_firmware(self):
+        """update_firmware should download the firmware and run the upgrade script."""
+        # We can mock the urllib request to return successfully
+        import urllib.request
+        from unittest.mock import patch
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b"Mock zip/tar content"
+        
+        with patch('urllib.request.urlopen', return_value=mock_response) as mock_urlopen, \
+             patch('subprocess.Popen') as mock_popen:
+             
+            result = self.handler._cmd_update_firmware({
+                "version": "1.2.0",
+                "url": "http://nodeflow-cloud/firmware/1.2.0.tar.gz",
+                "token": "test_token"
+            })
+            
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["version"], "1.2.0")
+            mock_urlopen.assert_called_once()
+            mock_popen.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
