@@ -48,6 +48,8 @@ class PayloadFormatter:
                 key_str = key.key if isinstance(key, DatapointKey) else str(key)
                 values[key_str] = value
 
+            values["device_name"] = converted_data.device_name
+
             payload = {
                 "serial_number": self._serial_number,
                 "ts": telemetry_entry.ts,
@@ -63,6 +65,7 @@ class PayloadFormatter:
         if attr_dict:
             values = {}
             values.update(attr_dict)
+            values["device_name"] = converted_data.device_name
             payload = {
                 "serial_number": self._serial_number,
                 "device_name": converted_data.device_name,

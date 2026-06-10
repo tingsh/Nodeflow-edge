@@ -26,6 +26,7 @@ from nodeflow_edge.gateway.payload_formatter import PayloadFormatter
 from nodeflow_edge.gateway.remote_config_handler import RemoteConfigHandler
 from nodeflow_edge.gateway.remote_log_handler import RemoteLogHandler
 from nodeflow_edge.gateway.rpc_handler import RpcHandler
+from nodeflow_edge.gateway.network_watchdog_handler import NetworkWatchdogHandler
 from nodeflow_edge.tb_utility.tb_loader import TBModuleLoader
 
 log = logging.getLogger("nodeflow_edge.gateway")
@@ -64,6 +65,12 @@ class NodeflowGateway:
 
         # ─── Cloud feature handlers ───────────────────────────────────
         feature_cfg = self._config.get("features", {})
+
+        # Network watchdog handler
+        self._network_watchdog = NetworkWatchdogHandler(
+            gateway=self,
+            config=feature_cfg.get("network_watchdog", {}),
+        )
 
         # Remote logging handler
         self._remote_log_handler = RemoteLogHandler(
@@ -291,6 +298,7 @@ class NodeflowGateway:
         self._mqtt_publisher.connect()
 
         # Start cloud feature handlers (after MQTT is connected)
+        self._network_watchdog.start()
         self._remote_log_handler.start()
         self._remote_log_handler.install()  # Install on root logger
         self._attribute_sync.start()
@@ -342,6 +350,7 @@ class NodeflowGateway:
         self._rpc_handler.stop()
         self._remote_config.stop()
         self._attribute_sync.stop()
+        self._network_watchdog.stop()
         self._remote_log_handler.uninstall()
         self._remote_log_handler.stop()
 

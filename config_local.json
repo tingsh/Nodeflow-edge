@@ -10,7 +10,7 @@
     "password": "",
     "qos": 1,
     "client_id": "nodeflow-edge-12345678",
-    "max_queue_size": 10000,
+    "max_queue_size": 100000,
     "reconnect_delay_min": 1,
     "reconnect_delay_max": 60
   },

@@ -132,7 +132,7 @@ class AttributeSyncHandler:
         except Exception:
             pass
 
-        return {
+        attrs = {
             "firmware_version": __version__,
             "ip_address": ip_address,
             "uptime_seconds": uptime,
@@ -143,6 +143,16 @@ class AttributeSyncHandler:
             "device_count": len(connected_devices),
             "status": status,
         }
+
+        # Merge network watchdog fields if available
+        if hasattr(self._gateway, "_network_watchdog") and self._gateway._network_watchdog:
+            try:
+                watchdog_attrs = self._gateway._network_watchdog.collect_watchdog_attributes()
+                attrs.update(watchdog_attrs)
+            except Exception as e:
+                log.warning("Failed to collect network watchdog attributes: %s", e)
+
+        return attrs
 
     def _publish_attributes(self, status: str = "online"):
         """Publish current gateway attributes to the cloud."""

@@ -19,7 +19,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pymodbus.datastore import (
-    ModbusSlaveContext,
+    ModbusDeviceContext as ModbusSlaveContext,
     ModbusServerContext,
     ModbusSequentialDataBlock,
 )
@@ -51,9 +51,9 @@ def build_holding_registers(register_map: dict, total_count: int = 100):
     values = [0] * (total_count + 1)
     for addr, fval in register_map.items():
         regs = float32_to_registers(fval)
-        values[addr + 1] = regs[0]
-        values[addr + 2] = regs[1]
-    return ModbusSequentialDataBlock(0, values)
+        values[addr] = regs[0]
+        values[addr + 1] = regs[1]
+    return ModbusSequentialDataBlock(1, values)
 
 
 # ─── Test class ───────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ class TestModbusIntegration(unittest.TestCase):
         """Start a local Modbus TCP server in a background thread."""
         hr_block = build_holding_registers(cls.REGISTER_MAP, total_count=100)
         store = ModbusSlaveContext(hr=hr_block, ir=hr_block)
-        cls.context = ModbusServerContext(slaves=store, single=True)
+        cls.context = ModbusServerContext(devices=store, single=True)
 
         cls._server_thread = threading.Thread(
             target=cls._run_server, daemon=True
@@ -107,17 +107,17 @@ class TestModbusIntegration(unittest.TestCase):
 
         try:
             # Read active_power (address 0, 2 registers)
-            result = client.read_holding_registers(0, count=2, slave=1)
+            result = client.read_holding_registers(0, count=2, device_id=1)
             self.assertFalse(result.isError(), f"Modbus read error: {result}")
             active_power = struct.unpack('>f', struct.pack('>HH', *result.registers))[0]
 
             # Read voltage (address 2, 2 registers)
-            result = client.read_holding_registers(2, count=2, slave=1)
+            result = client.read_holding_registers(2, count=2, device_id=1)
             self.assertFalse(result.isError())
             voltage = struct.unpack('>f', struct.pack('>HH', *result.registers))[0]
 
             # Read current (address 4, 2 registers)
-            result = client.read_holding_registers(4, count=2, slave=1)
+            result = client.read_holding_registers(4, count=2, device_id=1)
             self.assertFalse(result.isError())
             current = struct.unpack('>f', struct.pack('>HH', *result.registers))[0]
         finally:
@@ -152,8 +152,8 @@ class TestModbusIntegration(unittest.TestCase):
         self.assertAlmostEqual(payload["values"]["voltage"], 230.1, places=1)
         self.assertAlmostEqual(payload["values"]["current"], 12.5, places=1)
 
-        print("\n✅ Integration test passed!")
-        print(f"   Modbus simulator → ConvertedData → Nodeflow payload")
+        print("\n[SUCCESS] Integration test passed!")
+        print(f"   Modbus simulator -> ConvertedData -> Nodeflow payload")
         print(f"   Payload: {payload}")
 
 
