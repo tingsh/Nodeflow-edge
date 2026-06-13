@@ -37,6 +37,11 @@ python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
+# 3.5 Create unprivileged user and assign permissions
+echo "[3.5/6] Creating unprivileged user..."
+useradd -r -s /bin/false -G dialout nodeflow || true
+chown -R nodeflow:nodeflow "$INSTALL_DIR"
+
 # 4. Install systemd service
 echo "[4/6] Installing systemd service..."
 cp nodeflow-edge.service /etc/systemd/system/

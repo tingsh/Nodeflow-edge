@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-User=root
+User=nodeflow
 WorkingDirectory=/opt/nodeflow-edge
 ExecStart=/opt/nodeflow-edge/venv/bin/python -m nodeflow_edge.main --config /opt/nodeflow-edge/config.json
 Restart=always

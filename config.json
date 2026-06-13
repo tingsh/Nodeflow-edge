@@ -1,13 +1,13 @@
 {
   "gateway": {
-    "serial_number": "NF-EDGE-001"
+    "serial_number": "REPLACE_WITH_SERIAL_NUMBER"
   },
   "mqtt": {
     "host": "YOUR_CLOUD_IP",
     "port": 8883,
     "topic": "v1/gateway/telemetry",
-    "username": "NF-EDGE-001",
-    "password": "REPLACE_WITH_PROVISIONED_PASSWORD",
+    "username": "REPLACE_WITH_SERIAL_NUMBER",
+    "password": "REPLACE_WITH_CLAIM_CODE",
     "qos": 1,
     "client_id": "nodeflow-edge-001",
     "max_queue_size": 100000,
