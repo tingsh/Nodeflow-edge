@@ -42,6 +42,18 @@ echo "[3.5/6] Creating unprivileged user..."
 useradd -r -s /bin/false -G dialout nodeflow || true
 chown -R nodeflow:nodeflow "$INSTALL_DIR"
 
+# 3.9 Pre-flight configuration validation check
+echo "[3.9/6] Running configuration validation check..."
+if "$INSTALL_DIR/venv/bin/python" -m nodeflow_edge.main --config "$INSTALL_DIR/config.json" --validate-only; then
+    echo "  ✓ Configuration file is valid."
+else
+    echo ""
+    echo "  ⚠ WARNING: Configuration validation failed!"
+    echo "  Nodeflow Edge may fail to run or connect until configured."
+    echo "  Please inspect and edit $INSTALL_DIR/config.json."
+    echo ""
+fi
+
 # 4. Install systemd service
 echo "[4/6] Installing systemd service..."
 cp nodeflow-edge.service /etc/systemd/system/

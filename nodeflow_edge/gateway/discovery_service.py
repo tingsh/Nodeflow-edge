@@ -45,17 +45,19 @@ class DiscoveryService:
 
         self._enabled = self._config.get("enabled", False)
         self._scan_on_boot = self._config.get("scan_on_boot", True)
+        self._scan_interval_seconds = self._config.get("scan_interval_seconds", 3600)
         self._rtu_slave_range = self._config.get("rtu_slave_range", [1, 32])
         self._rtu_baud_rates = self._config.get("rtu_baud_rates", [9600, 19200])
         self._tcp_subnet_scan = self._config.get("tcp_subnet_scan", True)
         self._tcp_scan_timeout_ms = self._config.get("tcp_scan_timeout_ms", 500)
 
         self._scan_thread = None
+        self._periodic_thread = None
         self._stopped = False
         self._last_report = None
 
     def start(self):
-        """If scan_on_boot is True, run a scan after a short delay."""
+        """Start boot and periodic scan threads if enabled."""
         if not self._enabled:
             log.info("Discovery service is disabled.")
             return
@@ -65,6 +67,13 @@ class DiscoveryService:
                 target=self._boot_scan, name="DiscoveryBootScan", daemon=True
             )
             self._scan_thread.start()
+
+        if self._scan_interval_seconds > 0:
+            self._periodic_thread = threading.Thread(
+                target=self._periodic_scan_loop, name="DiscoveryPeriodicScan", daemon=True
+            )
+            self._periodic_thread.start()
+            log.info("Discovery periodic scan scheduled every %d seconds.", self._scan_interval_seconds)
 
     def stop(self):
         """Cancel any pending scans."""
@@ -76,7 +85,29 @@ class DiscoveryService:
         if self._stopped:
             return
         log.info("Running boot discovery scan...")
-        self.scan(scan_type="boot")
+        try:
+            self.scan(scan_type="boot")
+        except Exception as e:
+            log.exception("Boot discovery scan failed: %s", e)
+
+    def _periodic_scan_loop(self):
+        """Run periodic discovery scans at configured intervals."""
+        while not self._stopped:
+            # Sleep in small increments to respond to shutdown/stop quickly
+            sleep_time = self._scan_interval_seconds
+            for _ in range(int(sleep_time)):
+                if self._stopped:
+                    return
+                sleep(1)
+
+            if self._stopped:
+                return
+
+            log.info("Running periodic discovery scan...")
+            try:
+                self.scan(scan_type="periodic")
+            except Exception as e:
+                log.exception("Periodic discovery scan failed: %s", e)
 
     def scan(self, scan_type: str = "manual") -> dict:
         """

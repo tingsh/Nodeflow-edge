@@ -24,6 +24,15 @@ class MockGateway:
     def _start_connectors(self):
         pass
 
+    @staticmethod
+    def validate_config(config):
+        errors = []
+        if "gateway" not in config:
+            errors.append("gateway")
+        if "mqtt" not in config:
+            errors.append("mqtt")
+        return errors
+
 
 class TestRemoteConfigHandler(unittest.TestCase):
 

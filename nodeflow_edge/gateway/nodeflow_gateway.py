@@ -126,8 +126,8 @@ class NodeflowGateway:
         return config
 
     @staticmethod
-    def _validate_config(config: dict, config_path: str):
-        """Validate required config keys on startup. Exits with a clear message on failure."""
+    def validate_config(config: dict) -> list:
+        """Validate config dictionary structure. Returns a list of error strings (empty if valid)."""
         errors = []
 
         # Required top-level keys
@@ -161,12 +161,19 @@ class NodeflowGateway:
                     elif not os.path.isfile(val):
                         errors.append(f"mqtt.tls.{key} — file not found: {val}")
 
+        return errors
+
+    @staticmethod
+    def _validate_config(config: dict, config_path: str):
+        """Validate required config keys on startup. Exits with a clear message on failure."""
+        errors = NodeflowGateway.validate_config(config)
+
         if errors:
             print("\n" + "=" * 60)
             print("  CONFIG ERROR — Nodeflow Edge cannot start")
             print("=" * 60)
             for err in errors:
-                print(f"  ✗ Missing or invalid: {err}")
+                print(f"  x Missing or invalid: {err}")
             print(f"\n  Edit {config_path} to fix these issues.\n")
             sys.exit(1)
 

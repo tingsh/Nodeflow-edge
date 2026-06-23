@@ -104,11 +104,10 @@ class RemoteConfigHandler:
 
     def _apply_full_update(self, new_config: dict):
         """Replace the entire config.json and hot-reload all connectors."""
-        # Validate required sections
-        if "gateway" not in new_config:
-            raise ValueError("Config missing 'gateway' section")
-        if "mqtt" not in new_config:
-            raise ValueError("Config missing 'mqtt' section")
+        # Validate schema and required settings
+        errors = self._gateway.validate_config(new_config)
+        if errors:
+            raise ValueError(f"Invalid config schema: {', '.join(errors)}")
 
         # Backup current config
         self._create_backup()
@@ -145,9 +144,15 @@ class RemoteConfigHandler:
         if not found:
             raise ValueError(f"Connector '{connector_name}' not found in current config")
 
+        current_config["connectors"] = connectors
+
+        # Validate final config before applying
+        errors = self._gateway.validate_config(current_config)
+        if errors:
+            raise ValueError(f"Invalid config after updating connector: {', '.join(errors)}")
+
         # Backup, write, and reload
         self._create_backup()
-        current_config["connectors"] = connectors
         self._write_config(current_config)
 
         # Hot-reload: stop all connectors and restart
@@ -172,10 +177,15 @@ class RemoteConfigHandler:
                 raise ValueError(f"Connector '{connector_name}' already exists")
 
         connectors.append(connector_config)
+        current_config["connectors"] = connectors
+
+        # Validate final config before applying
+        errors = self._gateway.validate_config(current_config)
+        if errors:
+            raise ValueError(f"Invalid config after adding connector: {', '.join(errors)}")
 
         # Backup and write
         self._create_backup()
-        current_config["connectors"] = connectors
         self._write_config(current_config)
 
         # Hot-reload all connectors
@@ -200,9 +210,15 @@ class RemoteConfigHandler:
         if len(connectors) == original_count:
             raise ValueError(f"Connector '{connector_name}' not found")
 
+        current_config["connectors"] = connectors
+
+        # Validate final config before applying
+        errors = self._gateway.validate_config(current_config)
+        if errors:
+            raise ValueError(f"Invalid config after removing connector: {', '.join(errors)}")
+
         # Backup and write
         self._create_backup()
-        current_config["connectors"] = connectors
         self._write_config(current_config)
 
         # Hot-reload

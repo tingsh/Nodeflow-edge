@@ -58,6 +58,11 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)"
     )
+    parser.add_argument(
+        "--validate-only", "-v",
+        action="store_true",
+        help="Validate the config file and exit"
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -65,13 +70,29 @@ def main():
         sys.exit(1)
 
     # Load logging config from config.json (optional "logging" block)
+    config = None
     log_config = None
     try:
         with open(args.config, 'r') as f:
             config = json.load(f)
             log_config = config.get("logging")
-    except Exception:
+    except Exception as e:
+        if args.validate_only:
+            print(f"ERROR: Invalid JSON format: {e}")
+            sys.exit(1)
         pass
+
+    if args.validate_only:
+        setup_logging("WARNING", log_config=log_config)
+        errors = NodeflowGateway.validate_config(config)
+        if errors:
+            print(f"Configuration is INVALID. Found {len(errors)} error(s):")
+            for err in errors:
+                print(f"  x {err}")
+            sys.exit(1)
+        else:
+            print("Configuration is VALID.")
+            sys.exit(0)
 
     setup_logging(args.log_level, log_config=log_config)
 
