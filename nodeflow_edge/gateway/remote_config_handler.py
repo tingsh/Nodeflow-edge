@@ -124,43 +124,45 @@ class RemoteConfigHandler:
                  len(self._gateway._connectors))
 
     def _apply_connector_update(self, connector_config: dict):
-        """Update a specific connector's configuration."""
-        connector_name = connector_config.get("name")
-        if not connector_name:
-            raise ValueError("Connector update missing 'name' field")
-
-        # Load current config
+        """Update connectors without replacing gateway identity or MQTT settings."""
         current_config = self._read_config()
-        connectors = current_config.get("connectors", [])
 
-        # Find and replace the connector config
-        found = False
-        for i, conn in enumerate(connectors):
-            if conn.get("name") == connector_name:
-                connectors[i] = connector_config
-                found = True
-                break
+        if "connectors" in connector_config:
+            connectors = connector_config.get("connectors")
+            if not isinstance(connectors, list):
+                raise ValueError("Connector update 'connectors' field must be a list")
+            current_config["connectors"] = connectors
+            log.info("Replacing connector list with %d connector(s)", len(connectors))
+        else:
+            connector_name = connector_config.get("name")
+            if not connector_name:
+                raise ValueError("Connector update missing 'name' field")
 
-        if not found:
-            raise ValueError(f"Connector '{connector_name}' not found in current config")
+            connectors = current_config.get("connectors", [])
+            found = False
+            for i, conn in enumerate(connectors):
+                if conn.get("name") == connector_name:
+                    connectors[i] = connector_config
+                    found = True
+                    break
 
-        current_config["connectors"] = connectors
+            if not found:
+                raise ValueError(f"Connector '{connector_name}' not found in current config")
+            current_config["connectors"] = connectors
+            log.info("Connector '%s' updated", connector_name)
 
-        # Validate final config before applying
         errors = self._gateway.validate_config(current_config)
         if errors:
-            raise ValueError(f"Invalid config after updating connector: {', '.join(errors)}")
+            raise ValueError(f"Invalid config after updating connectors: {', '.join(errors)}")
 
-        # Backup, write, and reload
         self._create_backup()
         self._write_config(current_config)
 
-        # Hot-reload: stop all connectors and restart
         self._gateway._stop_connectors()
         self._gateway._config = current_config
         self._gateway._start_connectors()
 
-        log.info("Connector '%s' updated and reloaded", connector_name)
+        log.info("Connector update applied — %d connector(s) active", len(current_config.get("connectors", [])))
 
     def _apply_connector_add(self, connector_config: dict):
         """Add a new connector to the config and start it."""

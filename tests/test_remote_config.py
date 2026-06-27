@@ -101,6 +101,21 @@ class TestRemoteConfigHandler(unittest.TestCase):
             config = json.load(f)
         self.assertEqual(config["connectors"][0]["config"]["key"], "new_val")
 
+    def test_connector_update_replaces_connector_list(self):
+        """connector_update should accept Cloud-generated connector lists."""
+        updated = {
+            "connectors": [
+                {"type": "modbus", "name": "Modbus TCP Connector", "config": {"master": {"slaves": []}}}
+            ]
+        }
+        self.handler._apply_connector_update(updated)
+
+        with open(self.config_path) as f:
+            config = json.load(f)
+        self.assertEqual(len(config["connectors"]), 1)
+        self.assertEqual(config["connectors"][0]["name"], "Modbus TCP Connector")
+        self.assertEqual(config["connectors"][0]["type"], "modbus")
+
     def test_connector_add(self):
         """connector_add should append a new connector."""
         new_conn = {"type": "opcua", "name": "OPC-UA Conn", "config": {}}
