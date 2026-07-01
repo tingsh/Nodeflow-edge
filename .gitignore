@@ -1,4 +1,4 @@
-# Nodeflow Edge Git Ignore
+# Novena Gateway Git Ignore
 __pycache__/
 *.pyc
 *.pyo

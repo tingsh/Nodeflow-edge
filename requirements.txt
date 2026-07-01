@@ -1,4 +1,4 @@
-# Nodeflow Edge — Python Dependencies
+# Novena Gateway — Python Dependencies
 
 # Core
 sdnotify>=0.3.2
@@ -15,7 +15,7 @@ psutil
 cryptography
 PySocks
 
-# MQTT Publisher (Nodeflow Cloud)
+# MQTT Publisher (Novena Hub)
 paho-mqtt>=1.6.0
 
 # Modbus (TCP + RTU)

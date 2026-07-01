@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.rpc_handler import RpcHandler
+from novena_gateway.gateway.rpc_handler import RpcHandler
 
 
 class MockConnector:
@@ -281,7 +281,7 @@ class TestRpcHandler(unittest.TestCase):
              
             result = self.handler._cmd_update_firmware({
                 "version": "1.2.0",
-                "url": "http://nodeflow-cloud/firmware/1.2.0.tar.gz",
+                "url": "http://novena-hub/firmware/1.2.0.tar.gz",
                 "token": "test_token"
             })
             

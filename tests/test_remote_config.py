@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.remote_config_handler import RemoteConfigHandler
+from novena_gateway.gateway.remote_config_handler import RemoteConfigHandler
 
 
 class MockGateway:

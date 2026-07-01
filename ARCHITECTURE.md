@@ -1,10 +1,10 @@
-# Nodeflow Edge — Architecture & Project Guide
+# Novena Gateway — Architecture & Project Guide
 
-## What Is Nodeflow Edge?
+## What Is Novena Gateway?
 
-**Nodeflow Edge** is a Python-based IoT gateway designed to run on a Raspberry Pi Compute Module 4 (CM4). It connects to industrial field equipment — PLCs, VFDs, power meters, sensors — via protocol connectors (Modbus, OPC-UA, BACnet, etc.) and streams data to **Nodeflow Cloud** (a Django web platform) over MQTT. The cloud provides dashboards, alerts, and remote control.
+**Novena Gateway** is a Python-based IoT gateway designed to run on a Raspberry Pi Compute Module 4 (CM4). It connects to industrial field equipment — PLCs, VFDs, power meters, sensors — via protocol connectors (Modbus, OPC-UA, BACnet, etc.) and streams data to **Novena Hub** (a Django web platform) over MQTT. The cloud provides dashboards, alerts, and remote control.
 
-Customers buy a Nodeflow Edge unit, install it at their site, connect it to their equipment, and get cloud-based remote monitoring and control through their browser.
+Customers buy a Novena Gateway unit, install it at their site, connect it to their equipment, and get cloud-based remote monitoring and control through their browser.
 
 **Capabilities at a glance:**
 
@@ -25,7 +25,7 @@ The system has three layers connected over MQTT:
 
 ```mermaid
 graph TD
-    subgraph Cloud["Nodeflow Cloud (Django)"]
+    subgraph Cloud["Novena Hub (Django)"]
         UI[Dashboard UI]
         API[REST API]
         Consumer[mqtt_consumer.py]
@@ -37,9 +37,9 @@ graph TD
         MQTT{{"TLS encrypted · Per-gateway auth · LWT"}}
     end
 
-    subgraph Edge["Nodeflow Edge Gateway (Raspberry Pi CM4)"]
-        MQTTClient[NodeflowMqttPublisher]
-        Gateway[NodeflowGateway — Orchestrator]
+    subgraph Edge["Novena Gateway (Raspberry Pi CM4)"]
+        MQTTClient[NovenaMqttPublisher]
+        Gateway[NovenaGateway — Orchestrator]
         Handlers[Feature Handlers]
         Connectors[Protocol Connectors — 15 total]
     end
@@ -74,9 +74,9 @@ graph TD
 
 | Component | Role |
 |-----------|------|
-| **NodeflowMqttPublisher** | Bidirectional paho-mqtt v2.x client. Handles TLS (one-way / mTLS), LWT, publish, subscribe, auto-reconnect. |
-| **NodeflowGateway** | Core orchestrator. Config validation on startup, `sd_notify` watchdog integration, wires all handlers and connectors. |
-| **PayloadFormatter** | Converts `ConvertedData` from connectors into the Nodeflow Cloud JSON schema. |
+| **NovenaMqttPublisher** | Bidirectional paho-mqtt v2.x client. Handles TLS (one-way / mTLS), LWT, publish, subscribe, auto-reconnect. |
+| **NovenaGateway** | Core orchestrator. Config validation on startup, `sd_notify` watchdog integration, wires all handlers and connectors. |
+| **PayloadFormatter** | Converts `ConvertedData` from connectors into the Novena Hub JSON schema. |
 | **RemoteLogHandler** | Attaches to Python root logger. Buffers in a deque (500 max), flushes every 5 s in batches of 20. |
 | **AttributeSyncHandler** | Publishes heartbeat every 60 s (IP, uptime, firmware, devices, status). Handles inbound attribute push. |
 | **RemoteConfigHandler** | Receives config from cloud, validates, backs up, writes atomically, hot-reloads connectors, sends ACK. |
@@ -87,7 +87,7 @@ graph TD
 
 ## Startup Sequence
 
-Entry point: `python -m nodeflow_edge.main --config config.json`
+Entry point: `python -m novena_gateway.main --config config.json`
 
 ### Phase 0 — Entry point (`main.py`)
 
@@ -95,24 +95,24 @@ Entry point: `python -m nodeflow_edge.main --config config.json`
 2. Load the `"logging"` block from `config.json`
 3. Call `setup_logging()`:
    - **StreamHandler** to stdout (always active)
-   - **RotatingFileHandler** to `/opt/nodeflow-edge/logs/` (if configured) — 5 MB per file, 5 backups = 25 MB total
-4. Create `NodeflowGateway(config_path)`
+   - **RotatingFileHandler** to `/opt/novena-gateway/logs/` (if configured) — 5 MB per file, 5 backups = 25 MB total
+4. Create `NovenaGateway(config_path)`
 
-### Phase 1 — Initialization (`NodeflowGateway.__init__`)
+### Phase 1 — Initialization (`NovenaGateway.__init__`)
 
 1. **Load config** — `json.load(config.json)`
 2. **Validate config** — `_validate_config()` checks required keys (`gateway.serial_number`, `mqtt.host`, `mqtt.port`, `connectors`) and TLS cross-validation. On failure: prints a clear `CONFIG ERROR` message and calls `sys.exit(1)`.
-3. **Create MQTT client** — `NodeflowMqttPublisher(config["mqtt"], serial_number)`
+3. **Create MQTT client** — `NovenaMqttPublisher(config["mqtt"], serial_number)`
    - `_configure_tls()` — sets up one-way or mutual TLS based on `tls.mode`
    - `_configure_lwt()` — registers LWT with "offline" status payload
-4. **Create PayloadFormatter** — converts `ConvertedData` to Nodeflow Cloud JSON
+4. **Create PayloadFormatter** — converts `ConvertedData` to Novena Hub JSON
 5. **Create feature handlers:**
    - `RemoteLogHandler` (publisher, serial_number, feature config)
    - `AttributeSyncHandler` (gateway, publisher, serial_number, feature config)
    - `RemoteConfigHandler` (gateway, publisher, serial_number, config_path, feature config)
    - `RpcHandler` (gateway, publisher, serial_number, config_path, feature config)
 
-### Phase 2 — Run (`NodeflowGateway.run`)
+### Phase 2 — Run (`NovenaGateway.run`)
 
 1. **Connect MQTT** — TLS handshake with Mosquitto on port 8883
 2. **Start RemoteLogHandler** — starts flush thread (every 5 s) and attaches to Python root logger
@@ -140,7 +140,7 @@ Entry point: `python -m nodeflow_edge.main --config config.json`
    {"serial_number": "NF-EDGE-001", "ts": 1714000000000,
     "values": {"device_name": "Power Meter 1", "active_power": 450.2}}
    ```
-5. `NodeflowMqttPublisher.publish()` sends it via **QoS 1** to `v1/gateway/telemetry`
+5. `NovenaMqttPublisher.publish()` sends it via **QoS 1** to `v1/gateway/telemetry`
 6. **Cloud**: `mqtt_consumer` writes to TimescaleDB, dashboard renders the chart
 
 ### Flow 2 — Device Control (cloud → field device)
@@ -154,7 +154,7 @@ Entry point: `python -m nodeflow_edge.main --config config.json`
     "params": {"device_name": "VFD Motor 1", "functionCode": 6,
                "address": 2, "value": 1500, "type": "16uint"}}
    ```
-3. `NodeflowMqttPublisher._on_message()` routes to `RpcHandler._on_rpc_request()`
+3. `NovenaMqttPublisher._on_message()` routes to `RpcHandler._on_rpc_request()`
 4. RpcHandler dispatches `"write_device"` to `_cmd_write_device(params)`
 5. `_find_connector_for_device("VFD Motor 1")` looks up the device registry to find the owning `ModbusConnector`
 6. `connector.server_side_rpc_handler(content)` executes the Modbus FC6 write
@@ -191,9 +191,9 @@ Entry point: `python -m nodeflow_edge.main --config config.json`
 
 1. Any Python logger in the gateway emits a record (e.g., `log.warning("Timeout polling Power Meter 1")`)
 2. `RemoteLogHandler.emit()` (installed on root logger) receives it
-3. **Skip** if level < `min_level` (default `INFO`) or if the logger is `nodeflow_edge.mqtt_publisher` (infinite loop guard)
+3. **Skip** if level < `min_level` (default `INFO`) or if the logger is `novena_gateway.mqtt_publisher` (infinite loop guard)
 4. **Buffer** — appends to a `deque` (max 500 entries)
-5. **Flush thread** (every 5 s) batches up to 20 entries and calls `NodeflowMqttPublisher.publish_logs()`
+5. **Flush thread** (every 5 s) batches up to 20 entries and calls `NovenaMqttPublisher.publish_logs()`
 6. Published to `v1/gateway/logs`:
    ```json
    {"logs": [{"ts": ..., "level": "WARNING", "message": "Timeout polling Power Meter 1"}]}
@@ -240,9 +240,9 @@ All MQTT traffic between the gateway and broker is encrypted over TLS (port 8883
 ```json
 "tls": {
   "mode": "one-way",
-  "ca_certs": "/opt/nodeflow-edge/certs/ca.crt",
-  "certfile": "/opt/nodeflow-edge/certs/client.crt",
-  "keyfile":  "/opt/nodeflow-edge/certs/client.key"
+  "ca_certs": "/opt/novena-gateway/certs/ca.crt",
+  "certfile": "/opt/novena-gateway/certs/client.crt",
+  "keyfile":  "/opt/novena-gateway/certs/client.key"
 }
 ```
 
@@ -278,12 +278,12 @@ On startup, `_validate_config()` checks:
 
 ```
 ============================================================
-  CONFIG ERROR — Nodeflow Edge cannot start
+  CONFIG ERROR — Novena Gateway cannot start
 ============================================================
   ✗ Missing or invalid: mqtt.host
-  ✗ Missing or invalid: mqtt.tls.ca_certs — file not found: /opt/nodeflow-edge/certs/ca.crt
+  ✗ Missing or invalid: mqtt.tls.ca_certs — file not found: /opt/novena-gateway/certs/ca.crt
 
-  Edit /opt/nodeflow-edge/config.json to fix these issues.
+  Edit /opt/novena-gateway/config.json to fix these issues.
 ```
 
 ---
@@ -297,7 +297,7 @@ The gateway runs as a `Type=notify` systemd service. On startup it sends `READY=
 ### Auto-Restart on Crash
 
 ```ini
-# nodeflow-edge.service
+# novena-gateway.service
 Restart=always
 RestartSec=10
 ```
@@ -308,7 +308,7 @@ If the process exits for any reason (crash, unhandled exception, OOM kill), syst
 
 Local logs are written via `RotatingFileHandler`:
 
-- **Path:** `/opt/nodeflow-edge/logs/nodeflow-edge.log`
+- **Path:** `/opt/novena-gateway/logs/novena-gateway.log`
 - **Max size:** 5 MB per file
 - **Backups:** 5 rotated files (25 MB total)
 - Prevents the 32 GB SD card from filling up over weeks of operation
@@ -335,25 +335,25 @@ The gateway is configured entirely through `config.json`. Below is the full stru
     "serial_number": "NF-EDGE-001"
   },
   "mqtt": {
-    "host": "mqtt.nodeflow.io",
+    "host": "mqtt.${NOVENA_DOMAIN}",
     "port": 8883,
     "topic": "v1/gateway/telemetry",
     "username": "NF-EDGE-001",
     "password": "random-token-here",
     "qos": 1,
-    "client_id": "nodeflow-edge-001",
+    "client_id": "novena-gateway-001",
     "max_queue_size": 10000,
     "reconnect_delay_min": 1,
     "reconnect_delay_max": 60,
     "tls": {
       "mode": "one-way",
-      "ca_certs": "/opt/nodeflow-edge/certs/ca.crt",
-      "certfile": "/opt/nodeflow-edge/certs/client.crt",
-      "keyfile": "/opt/nodeflow-edge/certs/client.key"
+      "ca_certs": "/opt/novena-gateway/certs/ca.crt",
+      "certfile": "/opt/novena-gateway/certs/client.crt",
+      "keyfile": "/opt/novena-gateway/certs/client.key"
     }
   },
   "logging": {
-    "file": "/opt/nodeflow-edge/logs/nodeflow-edge.log",
+    "file": "/opt/novena-gateway/logs/novena-gateway.log",
     "max_bytes": 5242880,
     "backup_count": 5
   },
@@ -417,7 +417,7 @@ The gateway is configured entirely through `config.json`. Below is the full stru
 | `username` | string | `""` | MQTT auth username — set during provisioning. |
 | `password` | string | `""` | MQTT auth password — set during provisioning. |
 | `qos` | int | `1` | MQTT QoS level. `1` = at-least-once delivery. |
-| `client_id` | string | `"nodeflow-edge"` | Unique MQTT client ID. |
+| `client_id` | string | `"novena-gateway"` | Unique MQTT client ID. |
 | `max_queue_size` | int | `10000` | In-memory message buffer when the broker is offline. |
 | `reconnect_delay_min` | int | `1` | Seconds before first reconnect attempt. |
 | `reconnect_delay_max` | int | `60` | Max backoff between reconnect attempts (seconds). |
@@ -435,7 +435,7 @@ The gateway is configured entirely through `config.json`. Below is the full stru
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `file` | string | — | Log file path (e.g., `/opt/nodeflow-edge/logs/nodeflow-edge.log`). |
+| `file` | string | — | Log file path (e.g., `/opt/novena-gateway/logs/novena-gateway.log`). |
 | `max_bytes` | int | `5242880` | Max log file size before rotation (5 MB). |
 | `backup_count` | int | `5` | Number of rotated backup files to keep. |
 
@@ -475,10 +475,10 @@ The gateway is configured entirely through `config.json`. Below is the full stru
 ## Key Design Decisions
 
 **1. Connector compatibility without modification**
-`NodeflowGateway` implements the same interface (`add_device`, `del_device`, `send_to_storage`, `send_rpc_reply`, `get_devices`) that all 15 ThingsBoard connectors call internally. Zero connector code was touched.
+`NovenaGateway` implements the same interface (`add_device`, `del_device`, `send_to_storage`, `send_rpc_reply`, `get_devices`) that all 15 ThingsBoard connectors call internally. Zero connector code was touched.
 
 **2. One MQTT client for everything**
-A single `NodeflowMqttPublisher` handles both publish and subscribe. Handlers register callbacks via `publisher.subscribe(topic, fn)`. On reconnect, all subscriptions are automatically re-issued.
+A single `NovenaMqttPublisher` handles both publish and subscribe. Handlers register callbacks via `publisher.subscribe(topic, fn)`. On reconnect, all subscriptions are automatically re-issued.
 
 **3. Queue decouples connectors from MQTT**
 Connectors drop `ConvertedData` onto a `SimpleQueue`. A separate `DataProcessor` thread drains it. A slow or disconnected broker never blocks Modbus polling — data queues locally until the broker recovers.
@@ -490,7 +490,7 @@ Connectors drop `ConvertedData` onto a `SimpleQueue`. A separate `DataProcessor`
 `config.json` on disk is authoritative. Remote config updates write to disk *before* hot-reloading. If the process crashes mid-reload, the new config is already on disk so the next startup picks it up cleanly.
 
 **6. Infinite loop prevention in logging**
-`RemoteLogHandler` skips log records from `nodeflow_edge.mqtt_publisher`. Without this, publishing a log would emit another log, which would try to publish, recursing until stack overflow.
+`RemoteLogHandler` skips log records from `novena_gateway.mqtt_publisher`. Without this, publishing a log would emit another log, which would try to publish, recursing until stack overflow.
 
 **7. TLS mode flag for dashboard control**
 An explicit `"mode"` key in the `tls` config block (`"one-way"` / `"mutual"`) lets the cloud push mTLS upgrades via remote config — the customer can enable it from the dashboard without SSH access.
@@ -508,14 +508,14 @@ Instead of a simple `Type=simple` service, the gateway uses `Type=notify` with `
 |------|---------|
 | `config.json` | All config: gateway, MQTT, TLS, logging, features, connectors |
 | `install.sh` | Raspberry Pi deployment script (creates dirs, venv, systemd service) |
-| `nodeflow-edge.service` | systemd unit file (`Type=notify`, `WatchdogSec=120`, `Restart=always`) |
+| `novena-gateway.service` | systemd unit file (`Type=notify`, `WatchdogSec=120`, `Restart=always`) |
 | `requirements.txt` | Python dependencies (paho-mqtt, pymodbus, sdnotify, etc.) |
 | `setup.py` | Package setup (imports `__version__`) |
 | `ARCHITECTURE.md` | This file |
-| `NODEFLOW_CLOUD_SPEC.md` | Cloud-side implementation guide (Django, Mosquitto config) |
+| `NOVENA_CLOUD_SPEC.md` | Cloud-side implementation guide (Django, Mosquitto config) |
 | `Blueprint.md` | Original project goals and requirements |
 
-### `nodeflow_edge/` — Core package
+### `novena_gateway/` — Core package
 
 | File | Purpose |
 |------|---------|
@@ -523,13 +523,13 @@ Instead of a simple `Type=simple` service, the gateway uses `Type=notify` with `
 | `__version__.py` | Single source of truth: `__version__ = "0.1.0"` |
 | `main.py` | Entry point: CLI args, log rotation setup, gateway init |
 
-### `nodeflow_edge/gateway/` — Gateway logic
+### `novena_gateway/gateway/` — Gateway logic
 
 | File | Purpose |
 |------|---------|
-| `nodeflow_gateway.py` | **Orchestrator**: config validation, `sd_notify`, wires all components |
-| `nodeflow_mqtt_publisher.py` | **MQTT client**: TLS (one-way / mTLS), LWT, pub/sub, auto-reconnect |
-| `payload_formatter.py` | `ConvertedData` → Nodeflow Cloud JSON schema |
+| `novena_gateway.py` | **Orchestrator**: config validation, `sd_notify`, wires all components |
+| `novena_mqtt_publisher.py` | **MQTT client**: TLS (one-way / mTLS), LWT, pub/sub, auto-reconnect |
+| `payload_formatter.py` | `ConvertedData` → Novena Hub JSON schema |
 | `remote_log_handler.py` | **Feature**: buffered logs → cloud (deque + flush thread) |
 | `attribute_sync_handler.py` | **Feature**: heartbeat + attribute push (imports `__version__`) |
 | `remote_config_handler.py` | **Feature**: hot-reload config from cloud (backup + atomic write) |
@@ -537,7 +537,7 @@ Instead of a simple `Type=simple` service, the gateway uses `Type=notify` with `
 | `constants.py` | Connector type → class name mapping |
 | `entities/converted_data.py` | Data model produced by connectors |
 
-### `nodeflow_edge/connectors/` — Protocol connectors (15 total, unmodified from ThingsBoard Gateway)
+### `novena_gateway/connectors/` — Protocol connectors (15 total, unmodified from ThingsBoard Gateway)
 
 | Directory | Protocol |
 |-----------|----------|
@@ -557,7 +557,7 @@ Instead of a simple `Type=simple` service, the gateway uses `Type=notify` with `
 | `odbc/` | ODBC database connector |
 | `xmpp/` | XMPP messaging |
 
-### `nodeflow_edge/tb_utility/` — Shared utilities
+### `novena_gateway/tb_utility/` — Shared utilities
 
 | File | Purpose |
 |------|---------|
@@ -584,7 +584,7 @@ Instead of a simple `Type=simple` service, the gateway uses `Type=notify` with `
 - Raspberry Pi Compute Module 4 (2GB+ RAM, 32GB+ SD card)
 - Python 3.9+
 - Network access to the Mosquitto broker (port 8883 outbound)
-- CA certificate from Nodeflow Cloud
+- CA certificate from Novena Hub
 
 ### Install Steps
 
@@ -602,15 +602,15 @@ cp /path/to/ca.crt certs/ca.crt
 sudo bash install.sh
 
 # 4. Check the service is running
-sudo systemctl status nodeflow-edge
+sudo systemctl status novena-gateway
 #    Should show: "Active: active (running)" with "READY=1" in the status
 
-# 5. Verify on Nodeflow Cloud
+# 5. Verify on Novena Hub
 #    → Gateway should appear as "online" in the dashboard
 #    → Telemetry data should start flowing within the poll period
 ```
 
 ### Companion Documents
 
-- **`NODEFLOW_CLOUD_SPEC.md`** — Full implementation guide for the Django cloud backend: MQTT consumer, Django models, Mosquitto TLS/ACL setup, mTLS enterprise flow, API endpoints
+- **`NOVENA_CLOUD_SPEC.md`** — Full implementation guide for the Django cloud backend: MQTT consumer, Django models, Mosquitto TLS/ACL setup, mTLS enterprise flow, API endpoints
 - **`Blueprint.md`** — Original project goals and requirements

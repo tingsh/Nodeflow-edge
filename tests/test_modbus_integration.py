@@ -1,8 +1,8 @@
 """
-Integration test: Modbus TCP simulator → Nodeflow Edge Gateway → Payload verification
+Integration test: Modbus TCP simulator → Novena Gateway → Payload verification
 
 Starts a local pymodbus TCP server with known register values, then
-verifies that the PayloadFormatter produces correct Nodeflow Cloud payloads
+verifies that the PayloadFormatter produces correct Novena Hub payloads
 from ConvertedData objects matching what the Modbus connector would produce.
 
 This test validates the data pipeline WITHOUT requiring a live MQTT broker.
@@ -25,10 +25,10 @@ from pymodbus.datastore import (
 )
 from pymodbus.server import StartTcpServer
 
-from nodeflow_edge.gateway.payload_formatter import PayloadFormatter
-from nodeflow_edge.gateway.entities.converted_data import ConvertedData
-from nodeflow_edge.gateway.entities.datapoint_key import DatapointKey
-from nodeflow_edge.gateway.entities.telemetry_entry import TelemetryEntry
+from novena_gateway.gateway.payload_formatter import PayloadFormatter
+from novena_gateway.gateway.entities.converted_data import ConvertedData
+from novena_gateway.gateway.entities.datapoint_key import DatapointKey
+from novena_gateway.gateway.entities.telemetry_entry import TelemetryEntry
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ def build_holding_registers(register_map: dict, total_count: int = 100):
 # ─── Test class ───────────────────────────────────────────────────────
 
 class TestModbusIntegration(unittest.TestCase):
-    """Validate the Modbus data → Nodeflow payload pipeline."""
+    """Validate the Modbus data → Novena payload pipeline."""
 
     SERVER_HOST = "127.0.0.1"
     SERVER_PORT = 15502  # non-standard port to avoid conflicts
@@ -136,7 +136,7 @@ class TestModbusIntegration(unittest.TestCase):
             DatapointKey("current"): round(current, 2),
         }))
 
-        # Format into Nodeflow Cloud payload
+        # Format into Novena Hub payload
         formatter = PayloadFormatter("NF-EDGE-001")
         payloads = formatter.format(cd)
 
@@ -153,7 +153,7 @@ class TestModbusIntegration(unittest.TestCase):
         self.assertAlmostEqual(payload["values"]["current"], 12.5, places=1)
 
         print("\n[SUCCESS] Integration test passed!")
-        print(f"   Modbus simulator -> ConvertedData -> Nodeflow payload")
+        print(f"   Modbus simulator -> ConvertedData -> Novena payload")
         print(f"   Payload: {payload}")
 
 

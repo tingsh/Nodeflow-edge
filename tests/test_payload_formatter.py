@@ -1,4 +1,4 @@
-"""Unit tests for the Nodeflow Edge payload formatter."""
+"""Unit tests for the Novena Gateway payload formatter."""
 
 import sys
 import os
@@ -7,10 +7,10 @@ import unittest
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.payload_formatter import PayloadFormatter
-from nodeflow_edge.gateway.entities.converted_data import ConvertedData
-from nodeflow_edge.gateway.entities.datapoint_key import DatapointKey
-from nodeflow_edge.gateway.entities.telemetry_entry import TelemetryEntry
+from novena_gateway.gateway.payload_formatter import PayloadFormatter
+from novena_gateway.gateway.entities.converted_data import ConvertedData
+from novena_gateway.gateway.entities.datapoint_key import DatapointKey
+from novena_gateway.gateway.entities.telemetry_entry import TelemetryEntry
 
 
 class TestPayloadFormatter(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestPayloadFormatter(unittest.TestCase):
         self.formatter = PayloadFormatter("NF-EDGE-001")
 
     def test_basic_telemetry_payload(self):
-        """Verify that a ConvertedData with telemetry produces the Nodeflow Cloud schema."""
+        """Verify that a ConvertedData with telemetry produces the Novena Hub schema."""
         cd = ConvertedData("Power Meter 1", "default")
         cd.add_to_telemetry(TelemetryEntry({
             DatapointKey("active_power"): 450.2,

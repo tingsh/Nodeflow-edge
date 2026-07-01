@@ -3,23 +3,23 @@
     "serial_number": "REPLACE_WITH_SERIAL_NUMBER"
   },
   "mqtt": {
-    "host": "mqtt.nodeflow.io",
+    "host": "REPLACE_WITH_MQTT_BROKER_HOST",
     "port": 8883,
     "topic": "v1/gateway/telemetry",
     "username": "REPLACE_WITH_SERIAL_NUMBER",
     "password": "REPLACE_WITH_CLAIM_CODE",
     "qos": 1,
-    "client_id": "nodeflow-edge-REPLACE_WITH_SERIAL_NUMBER",
+    "client_id": "novena-gateway-REPLACE_WITH_SERIAL_NUMBER",
     "max_queue_size": 100000,
     "reconnect_delay_min": 1,
     "reconnect_delay_max": 60,
     "tls": {
       "mode": "one-way",
-      "ca_certs": "/opt/nodeflow-edge/certs/ca.crt"
+      "ca_certs": "/opt/novena-gateway/certs/ca.crt"
     }
   },
   "logging": {
-    "file": "/opt/nodeflow-edge/logs/nodeflow-edge.log",
+    "file": "/opt/novena-gateway/logs/novena-gateway.log",
     "max_bytes": 5242880,
     "backup_count": 5
   },

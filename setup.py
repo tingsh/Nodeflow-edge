@@ -1,17 +1,17 @@
 from setuptools import setup, find_packages
 
-from nodeflow_edge.__version__ import __version__
+from novena_gateway.__version__ import __version__
 
 setup(
-    name="nodeflow-edge",
+    name="novena-gateway",
     version=__version__,
-    description="Nodeflow Edge IoT Gateway — Industrial protocol gateway for Nodeflow Cloud",
-    author="Nodeflow",
+    description="Novena Gateway IoT Gateway — Industrial protocol gateway for Novena Hub",
+    author="Novena",
     packages=find_packages(),
     python_requires=">=3.9",
     entry_points={
         "console_scripts": [
-            "nodeflow-edge=nodeflow_edge.main:main",
+            "novena-gateway=novena_gateway.main:main",
         ],
     },
     install_requires=[

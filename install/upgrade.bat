@@ -1,5 +1,5 @@
 @echo off
-REM Nodeflow Edge Windows Mock OTA Upgrade Script
+REM Novena Gateway Windows Mock OTA Upgrade Script
 REM Usage: upgrade.bat C:\path\to\firmware.tar.gz 1.2.0
 
 set PAYLOAD_TAR=%1
@@ -10,9 +10,9 @@ echo Extracting payload to mock staging directory...
 timeout /t 1 >nul
 
 echo Updating package version...
-echo """Nodeflow Edge - Single source of truth for the package version.""" > nodeflow_edge\__version__.py
-echo. >> nodeflow_edge\__version__.py
-echo __version__ = "%VERSION%" >> nodeflow_edge\__version__.py
+echo """Novena Gateway - Single source of truth for the package version.""" > novena_gateway\__version__.py
+echo. >> novena_gateway\__version__.py
+echo __version__ = "%VERSION%" >> novena_gateway\__version__.py
 
 echo Pre-installing dependencies...
 timeout /t 1 >nul

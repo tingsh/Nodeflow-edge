@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.remote_log_handler import RemoteLogHandler
+from novena_gateway.gateway.remote_log_handler import RemoteLogHandler
 
 
 class TestRemoteLogHandler(unittest.TestCase):
@@ -48,7 +48,7 @@ class TestRemoteLogHandler(unittest.TestCase):
     def test_emit_skips_own_logger(self):
         """Logs from the MQTT publisher should be skipped to prevent infinite loops."""
         record = logging.LogRecord(
-            name="nodeflow_edge.mqtt_publisher", level=logging.INFO,
+            name="novena_gateway.mqtt_publisher", level=logging.INFO,
             pathname="test.py", lineno=10,
             msg="Publishing", args=(), exc_info=None
         )

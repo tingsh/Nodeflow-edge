@@ -1,8 +1,8 @@
-Project Goal: You are building Nodeflow Edge, a Python-based IoT gateway software designed to run on industrial hardware (Raspberry Pi CM4, Teltonika, etc.). Your goal is to securely read data from local industrial equipment (Modbus TCP/RTU) and publish it to a cloud MQTT broker.
+Project Goal: You are building Novena Gateway, a Python-based IoT gateway software designed to run on industrial hardware (Raspberry Pi CM4, Teltonika, etc.). Your goal is to securely read data from local industrial equipment (Modbus TCP/RTU) and publish it to a cloud MQTT broker.
 
-Architecture: This project is a strategic fork of the open-source thingsboard-gateway. We are utilizing their robust protocol connectors (Modbus, OPC-UA), but we are stripping out their server dependencies. We do NOT connect to a Java ThingsBoard server. We connect to a custom Django backend (Nodeflow Cloud).
+Architecture: This project is a strategic fork of the open-source thingsboard-gateway. We are utilizing their robust protocol connectors (Modbus, OPC-UA), but we are stripping out their server dependencies. We do NOT connect to a Java ThingsBoard server. We connect to a custom Django backend (Novena Hub).
 
-Integration Contract with Nodeflow Cloud: You must format all outbound MQTT payloads to match the exact schema expected by the Nodeflow Cloud MQTT Consumer.
+Integration Contract with Novena Hub: You must format all outbound MQTT payloads to match the exact schema expected by the Novena Hub MQTT Consumer.
 
 MQTT Broker Details:
 

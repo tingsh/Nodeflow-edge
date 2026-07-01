@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.attribute_sync_handler import AttributeSyncHandler
+from novena_gateway.gateway.attribute_sync_handler import AttributeSyncHandler
 
 
 class MockGateway:

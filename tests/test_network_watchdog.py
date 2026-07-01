@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch, call
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nodeflow_edge.gateway.network_watchdog_handler import NetworkWatchdogHandler
+from novena_gateway.gateway.network_watchdog_handler import NetworkWatchdogHandler
 
 
 class MockGateway:

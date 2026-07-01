@@ -1,0 +1,24 @@
+[Unit]
+Description=Novena Gateway IoT Gateway
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=novena
+WorkingDirectory=/opt/novena-gateway
+ExecStart=/opt/novena-gateway/venv/bin/python -m novena_gateway.main --config /opt/novena-gateway/config.json
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=novena-gateway
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Watchdog
+WatchdogSec=120
+
+[Install]
+WantedBy=multi-user.target
