@@ -80,6 +80,18 @@ class TestPayloadFormatter(unittest.TestCase):
         payloads = formatter.format(cd)
         self.assertEqual(payloads[0]["serial_number"], "NF-TEST-999")
 
+    def test_device_id_propagates_to_telemetry_and_attributes(self):
+        """device_id must be preserved so Novena Hub can match by device ID first."""
+        cd = ConvertedData("Power Meter 1", "default", device_id="42")
+        cd.add_to_telemetry(TelemetryEntry({DatapointKey("active_power"): 450.2}))
+        cd.add_to_attributes({DatapointKey("firmware"): "v1.2.3"})
+
+        payloads = self.formatter.format(cd)
+
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(payloads[0]["device_id"], "42")
+        self.assertEqual(payloads[1]["device_id"], "42")
+
 
 if __name__ == "__main__":
     unittest.main()
